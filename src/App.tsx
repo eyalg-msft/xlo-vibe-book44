@@ -1,295 +1,616 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Separator } from '@/components/ui/separator'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Plus, Save, Download, Upload } from '@phosphor-icons/react'
+import { Toaster } from "@/components/ui/toaster"
+import { Toaster as Sonner } from "sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import ExcelTopBar from "@/components/excel-ribbon/ExcelTopBar"
+import { ExcelRibbon } from "@/components/excel-ribbon/ExcelRibbon"
+import { FormulaBar } from "@/components/excel-grid/FormulaBar"
+import { ExcelGrid } from "@/components/excel-grid/ExcelGrid"
+import { SheetTabBar } from "@/components/excel-grid/SheetTabBar"
+import { StatusBar } from "@/components/excel-grid/StatusBar"
+import { evaluateFormula, FormulaContext } from "@/utils/formulaEngine"
+import { CellData, ClipboardData, Selection, RibbonActions, CellFormat } from "@/types/cellTypes"
+import { 
+  getSelectionCellRefs, 
+  applyCellFormat, 
+  createClipboardData, 
+  applyClipboardData,
+  getCellRef 
+} from "@/utils/cellFormatting"
 
-// Types for spreadsheet data
-type CellData = {
-  value: string
-  formula?: string
+interface Sheet {
+  id: string
+  name: string
+  isProtected: boolean
+  isVisible: boolean
 }
 
-type SpreadsheetData = {
-  [key: string]: CellData
+interface SheetData {
+  cellData: Record<string, CellData>
+  selectedCell: string
+  selectedCellValue: string
 }
 
-// Helper functions
-const getColumnLabel = (index: number): string => {
-  return String.fromCharCode(65 + index)
-}
-
-const getCellKey = (row: number, col: number): string => {
-  return `${getColumnLabel(col)}${row + 1}`
-}
-
-const parseFormula = (formula: string, data: SpreadsheetData): number | string => {
-  if (!formula.startsWith('=')) return formula
-  
-  const expression = formula.slice(1)
-  
-  // Handle SUM function
-  if (expression.startsWith('SUM(') && expression.endsWith(')')) {
-    const range = expression.slice(4, -1)
-    // Simple range like A1:A5
-    const [start, end] = range.split(':')
-    if (start && end) {
-      const startMatch = start.match(/([A-Z])(\d+)/)
-      const endMatch = end.match(/([A-Z])(\d+)/)
-      
-      if (startMatch && endMatch) {
-        const startCol = startMatch[1].charCodeAt(0) - 65
-        const startRow = parseInt(startMatch[2]) - 1
-        const endCol = endMatch[1].charCodeAt(0) - 65
-        const endRow = parseInt(endMatch[2]) - 1
-        
-        let sum = 0
-        for (let row = startRow; row <= endRow; row++) {
-          for (let col = startCol; col <= endCol; col++) {
-            const cellKey = getCellKey(row, col)
-            const cellValue = data[cellKey]?.value || '0'
-            const num = parseFloat(cellValue)
-            if (!isNaN(num)) sum += num
-          }
-        }
-        return sum
-      }
-    }
-  }
-  
-  // Replace cell references with values
-  let evaluatable = expression.replace(/[A-Z]\d+/g, (match) => {
-    const cellValue = data[match]?.value || '0'
-    const num = parseFloat(cellValue)
-    return isNaN(num) ? '0' : num.toString()
-  })
-  
-  try {
-    // Simple math evaluation (basic operations only)
-    if (/^[\d+\-*/.() ]+$/.test(evaluatable)) {
-      return eval(evaluatable)
-    }
-  } catch (e) {
-    return '#ERROR'
-  }
-  
-  return formula
+interface FormulaReference {
+  id: string
+  range: string
+  color: string
 }
 
 function App() {
-  const [spreadsheetData, setSpreadsheetData] = useKV<SpreadsheetData>('book44-data', {})
-  const [selectedCell, setSelectedCell] = useState<{row: number, col: number} | null>(null)
-  const [editingCell, setEditingCell] = useState<{row: number, col: number} | null>(null)
-  const [formulaBarValue, setFormulaBarValue] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  // Sheet management - persist with useKV
+  const [sheets, setSheets] = useKV<Sheet[]>('book44-sheets', [
+    { id: "sheet1", name: "Sheet1", isProtected: false, isVisible: true },
+    { id: "sheet2", name: "Sheet2", isProtected: false, isVisible: true },
+    { id: "sheet3", name: "Sheet3", isProtected: false, isVisible: true },
+  ])
+  const [activeSheetId, setActiveSheetId] = useKV<string>('book44-active-sheet', "sheet1")
   
-  const rows = 20
-  const cols = 10
+  // Sheet data storage - persist with useKV
+  const [sheetDataMap, setSheetDataMap] = useKV<Record<string, SheetData>>('book44-sheet-data', {
+    sheet1: { cellData: {}, selectedCell: "A1", selectedCellValue: "" },
+    sheet2: { cellData: {}, selectedCell: "A1", selectedCellValue: "" },
+    sheet3: { cellData: {}, selectedCell: "A1", selectedCellValue: "" },
+  })
+
+  // Formula building state (temporary state)
+  const [isFormulaBuildingMode, setIsFormulaBuildingMode] = useState(false)
+  const [formulaReferences, setFormulaReferences] = useState<FormulaReference[]>([])
+  const [rangeSelectionStart, setRangeSelectionStart] = useState<string | null>(null)
   
-  useEffect(() => {
-    if (selectedCell) {
-      const cellKey = getCellKey(selectedCell.row, selectedCell.col)
-      const cellData = spreadsheetData[cellKey]
-      setFormulaBarValue(cellData?.formula || cellData?.value || '')
-    }
-  }, [selectedCell, spreadsheetData])
+  // Clipboard state (temporary state)
+  const [clipboardData, setClipboardData] = useState<ClipboardData | null>(null)
   
-  const handleCellClick = (row: number, col: number) => {
-    if (editingCell) {
-      handleCellSave()
-    }
-    setSelectedCell({row, col})
-    setEditingCell(null)
-  }
+  // Selection state for ribbon operations (temporary state)
+  const [currentSelection, setCurrentSelection] = useState<Selection>({
+    start: { row: 0, col: 0 },
+    end: { row: 0, col: 0 }
+  })
   
-  const handleCellDoubleClick = (row: number, col: number) => {
-    setEditingCell({row, col})
-    setSelectedCell({row, col})
-    setTimeout(() => inputRef.current?.focus(), 0)
-  }
-  
-  const handleCellSave = () => {
-    if (!editingCell) return
-    
-    const cellKey = getCellKey(editingCell.row, editingCell.col)
-    const newValue = formulaBarValue
-    
-    setSpreadsheetData(current => ({
+  // Colors for formula references
+  const referenceColors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+  ]
+
+  // Current sheet data
+  const currentSheetData = sheetDataMap[activeSheetId] || { cellData: {}, selectedCell: "A1", selectedCellValue: "" }
+  const selectedCell = currentSheetData.selectedCell
+  const selectedCellValue = currentSheetData.selectedCellValue
+  const cellData = currentSheetData.cellData
+
+  // Helper function to update current sheet data
+  const updateCurrentSheetData = (updates: Partial<SheetData>) => {
+    setSheetDataMap((current) => ({
       ...current,
-      [cellKey]: {
-        value: newValue.startsWith('=') ? parseFormula(newValue, current).toString() : newValue,
-        formula: newValue.startsWith('=') ? newValue : undefined
+      [activeSheetId]: {
+        ...current[activeSheetId],
+        ...updates
       }
     }))
-    
-    setEditingCell(null)
   }
-  
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!selectedCell) return
+
+  const handleCellSelect = (cellRef: string, value: string) => {
+    // Get the cell data to check if it has a formula
+    const currentData = sheetDataMap[activeSheetId]
+    const cellInfo = currentData.cellData[cellRef]
     
-    if (e.key === 'Enter') {
-      if (editingCell) {
-        handleCellSave()
-      } else {
-        // Move down
-        setSelectedCell({
-          row: Math.min(selectedCell.row + 1, rows - 1),
-          col: selectedCell.col
-        })
-      }
-    } else if (e.key === 'Tab') {
-      e.preventDefault()
-      if (editingCell) {
-        handleCellSave()
-      }
-      // Move right
-      setSelectedCell({
-        row: selectedCell.row,
-        col: Math.min(selectedCell.col + 1, cols - 1)
-      })
-    } else if (e.key === 'Escape') {
-      setEditingCell(null)
-      if (selectedCell) {
-        const cellKey = getCellKey(selectedCell.row, selectedCell.col)
-        const cellData = spreadsheetData[cellKey]
-        setFormulaBarValue(cellData?.formula || cellData?.value || '')
-      }
-    } else if (!editingCell && e.key.length === 1) {
-      // Start editing if typing
-      setEditingCell(selectedCell)
-      setFormulaBarValue(e.key)
+    // Show formula in formula bar if cell has formula, otherwise show value
+    const formulaBarValue = cellInfo?.formula || value
+    
+    updateCurrentSheetData({
+      selectedCell: cellRef,
+      selectedCellValue: formulaBarValue
+    })
+  }
+
+  const handleCellUpdate = (cellRef: string, data: CellData) => {
+    const currentData = sheetDataMap[activeSheetId]
+    const updatedCellData = {
+      ...currentData.cellData,
+      [cellRef]: data
+    }
+    
+    updateCurrentSheetData({
+      cellData: updatedCellData,
+      // Update the formula bar if this is the currently selected cell
+      // Show formula if it exists, otherwise show the value
+      ...(cellRef === currentData.selectedCell ? { 
+        selectedCellValue: data.formula || data.value 
+      } : {})
+    })
+  }
+
+  const handleFormulaBarChange = (value: string) => {
+    updateCurrentSheetData({
+      selectedCellValue: value
+    })
+    
+    // Check if we should enter or exit formula building mode
+    const isFormula = value.startsWith('=')
+    
+    if (isFormula && !isFormulaBuildingMode) {
+      setIsFormulaBuildingMode(true)
+      setFormulaReferences([])
+      setRangeSelectionStart(null)
+    } else if (!isFormula && isFormulaBuildingMode) {
+      setIsFormulaBuildingMode(false)
+      setFormulaReferences([])
+      setRangeSelectionStart(null)
     }
   }
-  
-  const getCellValue = (row: number, col: number): string => {
-    const cellKey = getCellKey(row, col)
-    const cellData = spreadsheetData[cellKey]
-    return cellData?.value || ''
+
+  // Formula building mode handlers
+  const handleFormulaEditStart = () => {
+    const value = selectedCellValue
+    const isFormula = value.startsWith('=')
+    setIsFormulaBuildingMode(isFormula)
+    setFormulaReferences([])
+    setRangeSelectionStart(null)
   }
-  
-  const clearSheet = () => {
-    setSpreadsheetData({})
-    setSelectedCell(null)
-    setEditingCell(null)
-    setFormulaBarValue('')
+
+  const handleFormulaEditEnd = () => {
+    setIsFormulaBuildingMode(false)
+    setFormulaReferences([])
+    setRangeSelectionStart(null)
+  }
+
+  const handleFormulaReferenceAdd = (cellRef: string, isRange: boolean = false) => {
+    if (!isFormulaBuildingMode) return
+
+    const refId = `ref_${Date.now()}`
+    const color = referenceColors[formulaReferences.length % referenceColors.length]
+    
+    let range = cellRef
+    if (isRange && rangeSelectionStart && rangeSelectionStart !== cellRef) {
+      range = `${rangeSelectionStart}:${cellRef}`
+    }
+
+    const newRef: FormulaReference = {
+      id: refId,
+      range,
+      color
+    }
+
+    setFormulaReferences(prev => [...prev, newRef])
+    
+    // Add reference to formula
+    const currentFormula = selectedCellValue
+    const newFormula = currentFormula + range
+    updateCurrentSheetData({
+      selectedCellValue: newFormula
+    })
+
+    setRangeSelectionStart(null)
+  }
+
+  const handleCellClickInFormulaMode = (cellRef: string, isRangeSelection: boolean = false) => {
+    if (!isFormulaBuildingMode) {
+      return
+    }
+
+    if (isRangeSelection && !rangeSelectionStart) {
+      setRangeSelectionStart(cellRef)
+    } else {
+      handleFormulaReferenceAdd(cellRef, Boolean(rangeSelectionStart))
+    }
+  }
+
+  const handleApplyFormula = (value?: string) => {
+    const valueToUse = value || selectedCellValue
+    const isFormula = valueToUse.startsWith('=')
+    
+    let displayValue = valueToUse
+    
+    if (isFormula) {
+      // Create formula context for evaluation
+      const currentData = sheetDataMap[activeSheetId]
+      const formulaContext: FormulaContext = {
+        getCellValue: (ref: string) => {
+          const cellInfo = currentData.cellData[ref]
+          return cellInfo ? cellInfo.value : ''
+        },
+        setCellValue: (ref: string, value: string) => {
+          // This would be used for more complex formulas that modify other cells
+          // For now, we'll just implement the getter
+        }
+      }
+      
+      // Evaluate the formula
+      displayValue = evaluateFormula(valueToUse, formulaContext)
+    }
+    
+    handleCellUpdate(selectedCell, {
+      value: displayValue,
+      formula: isFormula ? valueToUse : undefined
+    })
+  }
+
+  // Sheet management functions
+  const handleSheetSelect = (sheetId: string) => {
+    setActiveSheetId(sheetId)
+  }
+
+  const handleSheetRename = (sheetId: string, newName: string) => {
+    setSheets((current) => current.map(sheet => 
+      sheet.id === sheetId ? { ...sheet, name: newName } : sheet
+    ))
+  }
+
+  const handleSheetAdd = () => {
+    const newSheetNumber = sheets.length + 1
+    const newSheetId = `sheet${Date.now()}`
+    const newSheet: Sheet = {
+      id: newSheetId,
+      name: `Sheet${newSheetNumber}`,
+      isProtected: false,
+      isVisible: true
+    }
+
+    setSheets((current) => [...current, newSheet])
+    setSheetDataMap((current) => ({
+      ...current,
+      [newSheetId]: { cellData: {}, selectedCell: "A1", selectedCellValue: "" }
+    }))
+    setActiveSheetId(newSheetId)
+  }
+
+  const handleSheetDelete = (sheetId: string) => {
+    if (sheets.length <= 1) return // Don't delete the last sheet
+    
+    const sheetIndex = sheets.findIndex(s => s.id === sheetId)
+    setSheets((current) => current.filter(sheet => sheet.id !== sheetId))
+    
+    // Remove sheet data
+    setSheetDataMap((current) => {
+      const { [sheetId]: deleted, ...rest } = current
+      return rest
+    })
+
+    // Switch to adjacent sheet if deleting active sheet
+    if (sheetId === activeSheetId) {
+      const remainingSheets = sheets.filter(s => s.id !== sheetId)
+      const newActiveIndex = Math.min(sheetIndex, remainingSheets.length - 1)
+      setActiveSheetId(remainingSheets[newActiveIndex]?.id || remainingSheets[0]?.id)
+    }
+  }
+
+  const handleSheetDuplicate = (sheetId: string) => {
+    const sourceSheet = sheets.find(s => s.id === sheetId)
+    if (!sourceSheet) return
+
+    const newSheetId = `sheet${Date.now()}`
+    const newSheet: Sheet = {
+      id: newSheetId,
+      name: `${sourceSheet.name} (2)`,
+      isProtected: sourceSheet.isProtected,
+      isVisible: sourceSheet.isVisible
+    }
+
+    setSheets((current) => [...current, newSheet])
+    
+    // Copy sheet data
+    const sourceData = sheetDataMap[sheetId]
+    setSheetDataMap((current) => ({
+      ...current,
+      [newSheetId]: {
+        cellData: { ...sourceData?.cellData || {} },
+        selectedCell: "A1",
+        selectedCellValue: ""
+      }
+    }))
+  }
+
+  const handleSheetMove = (sheetId: string, direction: 'left' | 'right') => {
+    const currentIndex = sheets.findIndex(s => s.id === sheetId)
+    if (currentIndex === -1) return
+
+    const newIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1
+    if (newIndex < 0 || newIndex >= sheets.length) return
+
+    const newSheets = [...sheets]
+    ;[newSheets[currentIndex], newSheets[newIndex]] = [newSheets[newIndex], newSheets[currentIndex]]
+    setSheets(newSheets)
+  }
+
+  const handleSheetToggleProtection = (sheetId: string) => {
+    setSheets((current) => current.map(sheet => 
+      sheet.id === sheetId ? { ...sheet, isProtected: !sheet.isProtected } : sheet
+    ))
+  }
+
+  const handleSheetToggleVisibility = (sheetId: string) => {
+    setSheets((current) => current.map(sheet => 
+      sheet.id === sheetId ? { ...sheet, isVisible: !sheet.isVisible } : sheet
+    ))
+  }
+
+  // Ribbon Actions Implementation
+  const ribbonActions: RibbonActions = {
+    // Clipboard operations
+    copy: () => {
+      const data = createClipboardData(cellData, currentSelection, 'copy')
+      setClipboardData(data)
+    },
+
+    paste: () => {
+      if (!clipboardData) return
+      const newCellData = applyClipboardData(cellData, clipboardData, currentSelection)
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    cut: () => {
+      const data = createClipboardData(cellData, currentSelection, 'cut')
+      setClipboardData(data)
+    },
+
+    // Font formatting
+    toggleBold: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const isBold = currentCell?.format?.bold
+        newCellData[ref] = applyCellFormat(currentCell, { bold: !isBold })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    toggleItalic: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const isItalic = currentCell?.format?.italic
+        newCellData[ref] = applyCellFormat(currentCell, { italic: !isItalic })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    toggleUnderline: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const isUnderline = currentCell?.format?.underline
+        newCellData[ref] = applyCellFormat(currentCell, { underline: !isUnderline })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    setFontFamily: (family: string) => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { fontFamily: family })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    setFontSize: (size: number) => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { fontSize: size })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    increaseFontSize: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const currentSize = currentCell?.format?.fontSize || 11
+        newCellData[ref] = applyCellFormat(currentCell, { fontSize: currentSize + 1 })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    decreaseFontSize: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const currentSize = currentCell?.format?.fontSize || 11
+        newCellData[ref] = applyCellFormat(currentCell, { fontSize: Math.max(8, currentSize - 1) })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    // Colors
+    setTextColor: (color: string) => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { textColor: color })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    setBackgroundColor: (color: string) => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { backgroundColor: color })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    // Alignment
+    setHorizontalAlignment: (align: 'left' | 'center' | 'right') => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { horizontalAlign: align })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    setVerticalAlignment: (align: 'top' | 'middle' | 'bottom') => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { verticalAlign: align })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    // Number formatting
+    setNumberFormat: (format: CellFormat['numberFormat']) => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        newCellData[ref] = applyCellFormat(currentCell, { numberFormat: format })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    increaseDecimals: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const currentFormat = currentCell?.format?.numberFormat
+        const currentDecimals = currentFormat?.decimals || 0
+        newCellData[ref] = applyCellFormat(currentCell, { 
+          numberFormat: { 
+            ...currentFormat,
+            type: currentFormat?.type || 'number',
+            decimals: currentDecimals + 1 
+          }
+        })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    decreaseDecimals: () => {
+      const cellRefs = getSelectionCellRefs(currentSelection)
+      const newCellData = { ...cellData }
+      
+      cellRefs.forEach(ref => {
+        const currentCell = newCellData[ref]
+        const currentFormat = currentCell?.format?.numberFormat
+        const currentDecimals = currentFormat?.decimals || 0
+        newCellData[ref] = applyCellFormat(currentCell, { 
+          numberFormat: { 
+            ...currentFormat,
+            type: currentFormat?.type || 'number',
+            decimals: Math.max(0, currentDecimals - 1) 
+          }
+        })
+      })
+      
+      updateCurrentSheetData({ cellData: newCellData })
+    },
+
+    // Undo/Redo (basic implementation for now)
+    undo: () => {
+      // TODO: Implement proper undo/redo with history stack
+      console.log('Undo functionality needs implementation')
+    },
+
+    redo: () => {
+      // TODO: Implement proper undo/redo with history stack
+      console.log('Redo functionality needs implementation')
+    }
+  }
+
+  // Handle selection updates from ExcelGrid
+  const handleSelectionChange = (selection: Selection) => {
+    setCurrentSelection(selection)
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background" onKeyDown={handleKeyDown} tabIndex={0}>
-      {/* Header */}
-      <div className="border-b bg-card p-2">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold text-foreground">Book44</h1>
-          <Separator orientation="vertical" className="h-6" />
-          <Button variant="outline" size="sm" onClick={clearSheet}>
-            <Plus className="w-4 h-4 mr-1" />
-            New
-          </Button>
-          <Button variant="outline" size="sm">
-            <Save className="w-4 h-4 mr-1" />
-            Save
-          </Button>
+    <TooltipProvider>
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        {/* Fixed header area - stays at top */}
+        <div className="flex-shrink-0">
+          <ExcelTopBar />
+          <ExcelRibbon ribbonActions={ribbonActions} />
+          <FormulaBar
+            selectedCell={selectedCell}
+            cellValue={selectedCellValue}
+            onCellValueChange={handleFormulaBarChange}
+            onApplyFormula={handleApplyFormula}
+            onFormulaEditStart={handleFormulaEditStart}
+            onFormulaEditEnd={handleFormulaEditEnd}
+          />
+        </div>
+        
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-hidden">
+          <ExcelGrid
+            onCellSelect={handleCellSelect}
+            cellData={cellData}
+            onCellUpdate={handleCellUpdate}
+            isFormulaBuildingMode={isFormulaBuildingMode}
+            formulaReferences={formulaReferences}
+            rangeSelectionStart={rangeSelectionStart}
+            onCellClickInFormulaMode={handleCellClickInFormulaMode}
+            onSelectionChange={handleSelectionChange}
+          />
+        </div>
+        
+        {/* Fixed footer - Sheet tabs */}
+        <div className="flex-shrink-0">
+          <SheetTabBar
+            sheets={sheets}
+            activeSheetId={activeSheetId}
+            onSheetSelect={handleSheetSelect}
+            onSheetRename={handleSheetRename}
+            onSheetAdd={handleSheetAdd}
+            onSheetDelete={handleSheetDelete}
+            onSheetDuplicate={handleSheetDuplicate}
+            onSheetMove={handleSheetMove}
+            onSheetToggleProtection={handleSheetToggleProtection}
+            onSheetToggleVisibility={handleSheetToggleVisibility}
+          />
+        </div>
+        
+        {/* Fixed status bar - always at bottom */}
+        <div className="flex-shrink-0">
+          <StatusBar />
         </div>
       </div>
-
-      {/* Formula Bar */}
-      <div className="border-b bg-muted/30 p-2">
-        <div className="flex items-center gap-2">
-          <div className="w-16 text-sm font-medium text-muted-foreground">
-            {selectedCell ? getCellKey(selectedCell.row, selectedCell.col) : ''}
-          </div>
-          <div className="flex-1">
-            <Input
-              ref={inputRef}
-              value={formulaBarValue}
-              onChange={(e) => setFormulaBarValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleCellSave()
-                }
-              }}
-              placeholder="Enter value or formula (=SUM(A1:A5))"
-              className="bg-background"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Spreadsheet Grid */}
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full w-full">
-          <div className="inline-block min-w-full">
-            {/* Column Headers */}
-            <div className="flex">
-              <div className="w-12 h-8 bg-muted border border-border flex items-center justify-center text-xs font-medium">
-                
-              </div>
-              {Array.from({length: cols}, (_, colIndex) => (
-                <div key={colIndex} className="w-24 h-8 bg-muted border border-border flex items-center justify-center text-xs font-medium">
-                  {getColumnLabel(colIndex)}
-                </div>
-              ))}
-            </div>
-            
-            {/* Rows */}
-            {Array.from({length: rows}, (_, rowIndex) => (
-              <div key={rowIndex} className="flex">
-                {/* Row Header */}
-                <div className="w-12 h-8 bg-muted border border-border flex items-center justify-center text-xs font-medium">
-                  {rowIndex + 1}
-                </div>
-                
-                {/* Cells */}
-                {Array.from({length: cols}, (_, colIndex) => {
-                  const isSelected = selectedCell?.row === rowIndex && selectedCell?.col === colIndex
-                  const isEditing = editingCell?.row === rowIndex && editingCell?.col === colIndex
-                  
-                  return (
-                    <div
-                      key={colIndex}
-                      className={`w-24 h-8 border border-border flex items-center px-1 text-xs cursor-cell ${
-                        isSelected ? 'bg-primary text-primary-foreground border-primary' : 
-                        'bg-background hover:bg-accent'
-                      }`}
-                      onClick={() => handleCellClick(rowIndex, colIndex)}
-                      onDoubleClick={() => handleCellDoubleClick(rowIndex, colIndex)}
-                    >
-                      {isEditing ? (
-                        <input
-                          ref={inputRef}
-                          value={formulaBarValue}
-                          onChange={(e) => setFormulaBarValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          className="w-full h-full bg-transparent outline-none"
-                          autoFocus
-                        />
-                      ) : (
-                        <span className="truncate w-full">
-                          {getCellValue(rowIndex, colIndex)}
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
-
-      {/* Status Bar */}
-      <div className="border-t bg-muted/30 p-1 px-3">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <div>
-            {selectedCell ? `Selected: ${getCellKey(selectedCell.row, selectedCell.col)}` : 'Ready'}
-          </div>
-          <div>Book44 Spreadsheet</div>
-        </div>
-      </div>
-    </div>
+      
+      <Toaster />
+      <Sonner />
+    </TooltipProvider>
   )
 }
 
