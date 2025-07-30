@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useKV } from '@github/spark/hooks'
-import { Toaster } from "@/components/ui/toaster"
-import { Toaster as Sonner } from "sonner"
+import { Toaster } from "sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import ExcelTopBar from "@/components/excel-ribbon/ExcelTopBar"
 import { ExcelRibbon } from "@/components/excel-ribbon/ExcelRibbon"
@@ -609,7 +608,6 @@ function App() {
       </div>
       
       <Toaster />
-      <Sonner />
     </TooltipProvider>
   )
 }
