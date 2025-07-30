@@ -4,7 +4,7 @@
 @layer base {
   * {
     @apply border-border;
-  }
+:ro
 }
 
 :root {
@@ -22,70 +22,69 @@
   --primary-foreground: oklch(1 0 0); /* White text on blue */
   --secondary: oklch(0.95 0 0); /* Light gray */
   --secondary-foreground: oklch(0.3 0 0); /* Dark gray text */
-  --accent: oklch(0.97 0.02 260); /* Very light blue accent */
-  --accent-foreground: oklch(0.15 0 0);
-  --destructive: oklch(0.6 0.2 20); /* Red for destructive actions */
-  --destructive-foreground: oklch(1 0 0);
-
-  /* Supporting UI colors */
-  --muted: oklch(0.96 0 0); /* Light gray for muted backgrounds */
-  --muted-foreground: oklch(0.45 0 0); /* Medium gray for muted text */
-  --border: oklch(0.9 0 0); /* Light border color */
-  --input: oklch(0.9 0 0); /* Input border color */
-  --ring: oklch(0.5 0.15 260); /* Focus ring color matches primary */
-
-  /* Border radius system */
-  --radius: 0.5rem;
-}
-
-@theme {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--s
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-accent-foreground: var(--accent
 
-  --radius-sm: calc(var(--radius) * 0.5);
+  --color-input: var(--input
+
   --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) * 1.5);
   --radius-xl: calc(var(--radius) * 2);
-  --radius-2xl: calc(var(--radius) * 3);
   --radius-full: 9999px;
-}
 
-/* Custom spreadsheet styles */
-.cell {
-  border: 1px solid var(--border);
+
   transition: all 0.1s ease;
-}
 
-.cell:hover {
-  background-color: var(--accent);
-}
+ 
 
-.cell.selected {
-  background-color: var(--primary);
-  color: var(--primary-foreground);
+  backgr
   border-color: var(--primary);
+
+  background-color: var(--ba
+  border-color: var(--ring);
 }
 
-.cell.editing {
-  background-color: var(--background);
-  color: var(--foreground);
-  border-color: var(--ring);
-  box-shadow: 0 0 0 2px var(--ring);
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
