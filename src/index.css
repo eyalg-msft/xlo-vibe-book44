@@ -4,7 +4,7 @@
 @layer base {
   * {
     @apply border-border
-  }
+  -
 }
 
 :root {
@@ -22,30 +22,30 @@
   --primary-foreground: oklch(1 0 0); /* White text on blue */
   --secondary: oklch(0.95 0 0); /* Light gray */
   --secondary-foreground: oklch(0.3 0 0); /* Dark gray text */
-  --accent: oklch(0.92 0.05 260); /* Very light blue */
-  --accent-foreground: oklch(0.2 0.1 260); /* Dark blue text */
-  --destructive: oklch(0.6 0.2 25); /* Red for errors */
-  --destructive-foreground: oklch(1 0 0);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-destructive: var(--destructive)
 
-  /* Grid and interface colors */
-  --muted: oklch(0.97 0 0); /* Light grid background */
-  --muted-foreground: oklch(0.5 0 0); /* Muted text */
-  --border: oklch(0.9 0 0); /* Grid borders */
-  --input: oklch(0.9 0 0); /* Input borders */
-  --ring: oklch(0.5 0.15 260); /* Focus ring */
-
-  --radius: 0.25rem; /* Minimal rounding for professional look */
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-lg: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 3);
+  
 }
 
-@theme {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+  border: 1px solid var(--border);
+}
+
+}
+.cell.selected {
+  color: var(--primary-foreground);
+}
+.cell.editing {
+  color: var(--foreground);
+  box-shadow: 0 0 0 2px var(--ring);
+
+
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
