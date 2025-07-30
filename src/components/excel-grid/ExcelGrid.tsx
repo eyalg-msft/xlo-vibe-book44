@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { evaluateFormula, FormulaContext } from "@/utils/formulaEngine";
 import { CellData, Selection } from "@/types/cellTypes";
-import { getCellStyles, formatCellValue } from "@/utils/cellFormatting";
+import { getCellStyle, formatCellValue } from "@/utils/cellFormatting";
 
 interface FormulaReference {
   id: string;
@@ -379,8 +379,8 @@ export const ExcelGrid = ({
               const isRangeStart = rangeSelectionStart === cellRef;
               
               // Get cell formatting styles
-              const cellStyles = getCellStyles(cellInfo.format);
-              const formattedValue = formatCellValue(cellInfo.value, cellInfo.format);
+              const cellStyles = getCellStyle(cellInfo);
+              const formattedValue = formatCellValue(cellInfo);
               
               // Determine background color and styles
               let bgColor = 'bg-white hover:bg-gray-50';
