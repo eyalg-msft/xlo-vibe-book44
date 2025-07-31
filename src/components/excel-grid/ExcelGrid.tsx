@@ -383,80 +383,59 @@ export const ExcelGrid = ({
               const formattedValue = formatCellValue(cellInfo);
               
               // Determine background color and styles
-              let bgColor = 'bg-white hover:bg-gray-50';
+              let cellStyle: React.CSSProperties = { ...
               let cellStyle: React.CSSProperties = { ...cellStyles };
               let borderStyle = '';
               
               if (isSelected) {
-                // Make selected cells transparent with selection border, but preserve cell background colors
-                if (cellStyles.backgroundColor) {
-                  // If cell has a custom background color, keep it but remove hover effect
-                  bgColor = '';
-                } else {
-                  // If no custom background, make it transparent and remove hover effect
-                  bgColor = 'bg-transparent';
-                }
-                
-                if (isActiveCell) {
+                // Make selected cells transparent with selection border
+                bgColor = 'bg-transparent';
+                  borderStyle = 'bo
                   // Active cell gets a thick green border
                   borderStyle = 'border-2 border-[#127d42]';
                 } else {
                   // Other selected cells get a thin green border
                   borderStyle = 'border border-[#127d42]';
-                }
+                 
               } else if (formulaRef) {
                 // Override with formula reference styling
                 cellStyle = {
-                  ...cellStyle,
+              return (
                   backgroundColor: `rgba(${parseInt(formulaRef.color.slice(1, 3), 16)}, ${parseInt(formulaRef.color.slice(3, 5), 16)}, ${parseInt(formulaRef.color.slice(5, 7), 16)}, 0.3)`,
-                  borderColor: formulaRef.color,
+                  className={`w-20 h-6 border-r 
                   borderWidth: '2px',
-                  borderStyle: 'solid'
+                  onMouseOver={() => h
                 };
               } else if (isRangeStart) {
                 bgColor = 'bg-blue-100';
-              }
+                      value={editValue}
 
-              return (
-                <div
+                      onBlur={finishEditing}
+                <div=> {
                   key={colIndex}
-                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders} ${borderStyle}`}
-                  style={cellStyle}
+                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
+                          finishEditing();
                   onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
                   onMouseOver={() => handleMouseOver(rowIndex, colIndex)}
                   onDoubleClick={() => handleCellDoubleClick(rowIndex, colIndex)}
-                >
+                        }
                   {isEditing ? (
-                    <input
+                      className="w-full h-full px-1 text-xs border-0 outline-none bg-transparent"
                       ref={editInputRef}
-                      value={editValue}
+                      autoFocus
                       onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={finishEditing}
+                  ) : (
                       onKeyDown={(e) => {
-                        e.stopPropagation();
+                        e.stopPropagation();flow-hidden"
                         if (e.key === 'Enter') {
                           finishEditing();
                         } else if (e.key === 'Escape') {
                           setEditingCell(null);
                           setEditValue("");
-                        }
+                </div>
                       }}
                       className="w-full h-full px-1 text-xs border-0 outline-none bg-transparent"
                       style={cellStyles}
-                      autoFocus
-                    />
-                  ) : (
-                    <div 
-                      className="w-full h-full px-1 text-xs flex items-center overflow-hidden"
-                      style={cellStyles}
-                    >
-                      {formattedValue}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         ))}
       </div>
     </div>
