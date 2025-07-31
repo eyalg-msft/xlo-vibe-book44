@@ -383,7 +383,6 @@ export const ExcelGrid = ({
               const formattedValue = formatCellValue(cellInfo);
               
               // Determine background color and styles
-              let cellStyle: React.CSSProperties = { ...
               let cellStyle: React.CSSProperties = { ...cellStyles };
               let borderStyle = '';
               
