@@ -380,63 +380,60 @@ export const ExcelGrid = ({
               
               // Get cell formatting styles
               const cellStyles = getCellStyle(cellInfo);
-              const formattedValue = formatCellValue(cellInfo);
+              // Determine background color and styles
               
               // Determine background color and styles
               let cellStyle: React.CSSProperties = { ...cellStyles };
               let borderStyle = '';
-              
+                bgColor = 'bg-transparent';
               if (isSelected) {
                 // Make selected cells transparent with selection border
-                bgColor = 'bg-transparent';
+                bgColor = 'bg-transparent';]';
                   borderStyle = 'bo
                   // Active cell gets a thick green border
                   borderStyle = 'border-2 border-[#127d42]';
-                } else {
-                  // Other selected cells get a thin green border
-                  borderStyle = 'border border-[#127d42]';
                  
-              } else if (formulaRef) {
+                  // Other selected cells get a thin green border
                 // Override with formula reference styling
+                 
+              return (
+                // Override with formula reference styling16)}, ${parseInt(formulaRef.color.slice(3, 5), 16)}, ${parseInt(formulaRef.color.slice(5, 7), 16)}, 0.3)`,
                 cellStyle = {
               return (
                   backgroundColor: `rgba(${parseInt(formulaRef.color.slice(1, 3), 16)}, ${parseInt(formulaRef.color.slice(3, 5), 16)}, ${parseInt(formulaRef.color.slice(5, 7), 16)}, 0.3)`,
                   className={`w-20 h-6 border-r 
-                  borderWidth: '2px',
+                  borderWidth: '2px',) {
                   onMouseOver={() => h
                 };
               } else if (isRangeStart) {
                 bgColor = 'bg-blue-100';
                       value={editValue}
 
-                      onBlur={finishEditing}
+                      onBlur={finishEditing}r-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
                 <div=> {
-                  key={colIndex}
+                  key={colIndex}}
                   className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
                           finishEditing();
                   onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
                   onMouseOver={() => handleMouseOver(rowIndex, colIndex)}
                   onDoubleClick={() => handleCellDoubleClick(rowIndex, colIndex)}
-                        }
-                  {isEditing ? (
-                      className="w-full h-full px-1 text-xs border-0 outline-none bg-transparent"
                       ref={editInputRef}
-                      autoFocus
+                  {isEditing ? (
                       onChange={(e) => setEditValue(e.target.value)}
-                  ) : (
+                      ref={editInputRef}
+                      onKeyDown={(e) => {
+                      onChange={(e) => setEditValue(e.target.value)}
+                        if (e.key === 'Enter') {
                       onKeyDown={(e) => {
                         e.stopPropagation();flow-hidden"
                         if (e.key === 'Enter') {
                           finishEditing();
                         } else if (e.key === 'Escape') {
                           setEditingCell(null);
-                          setEditValue("");
-                </div>
+                          setEditValue("");der-0 outline-none bg-transparent"
+                      style={cellStyles}
                       }}
                       className="w-full h-full px-1 text-xs border-0 outline-none bg-transparent"
                       style={cellStyles}
-        ))}
-      </div>
-    </div>
   );
 };
