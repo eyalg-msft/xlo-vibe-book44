@@ -48,7 +48,7 @@ const parseSelection = (selection: Selection): string => {
 export const ExcelGrid = ({ 
   onCellSelect, 
   cellData, 
-  onCellUpdate, 
+  onCellUpdate,
   isFormulaBuildingMode = false,
   formulaReferences = [],
   rangeSelectionStart = null,
@@ -59,313 +59,297 @@ export const ExcelGrid = ({
     start: { row: 0, col: 0 },
     end: { row: 0, col: 0 }
   });
-  const [isSelecting, setIsSelecting] = useState(false);
+  
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ row: number; col: number } | null>(null);
+  
+  const inputRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
 
-  const isInSelection = useCallback((row: number, col: number): boolean => {
-    const minRow = Math.min(selection.start.row, selection.end.row);
-    const maxRow = Math.max(selection.start.row, selection.end.row);
-    const minCol = Math.min(selection.start.col, selection.end.col);
-    const maxCol = Math.max(selection.start.col, selection.end.col);
+  // Handle cell selection
+  const handleCellSelect = useCallback((row: number, col: number, extendSelection = false) => {
+    const cellRef = getCellRef(row, col);
+    const cellInfo = cellData[cellRef] || { value: "" };
     
-    return row >= minRow && row <= maxRow && col >= minCol && col <= maxCol;
+    if (isFormulaBuildingMode && onCellClickInFormulaMode) {
+      onCellClickInFormulaMode(cellRef, extendSelection);
+      return;
+    }
+
+    const newSelection: Selection = extendSelection && selection ? {
+      start: selection.start,
+      end: { row, col }
+    } : {
+      start: { row, col },
+      end: { row, col }
+    };
+
+    setSelection(newSelection);
+    onSelectionChange?.(newSelection);
+    
+    // Show formula in formula bar if cell has formula, otherwise show value
+    const displayValue = cellInfo.formula || cellInfo.value;
+    onCellSelect(cellRef, displayValue);
+  }, [cellData, selection, isFormulaBuildingMode, onCellClickInFormulaMode, onCellSelect, onSelectionChange]);
+
+  // Handle mouse events for selection
+  const handleMouseDown = useCallback((row: number, col: number, event: React.MouseEvent) => {
+    event.preventDefault();
+    
+    if (editingCell) {
+      finishEditing();
+    }
+
+    const extendSelection = event.shiftKey;
+    setIsDragging(!extendSelection);
+    setDragStart({ row, col });
+    
+    handleCellSelect(row, col, extendSelection);
+  }, [editingCell, handleCellSelect]);
+
+  const handleMouseOver = useCallback((row: number, col: number) => {
+    if (isDragging && dragStart) {
+      const newSelection: Selection = {
+        start: dragStart,
+        end: { row, col }
+      };
+      setSelection(newSelection);
+      onSelectionChange?.(newSelection);
+    }
+  }, [isDragging, dragStart, onSelectionChange]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setDragStart(null);
+  }, []);
+
+  // Handle double click for editing
+  const handleCellDoubleClick = useCallback((row: number, col: number) => {
+    if (isFormulaBuildingMode) return;
+    
+    const cellRef = getCellRef(row, col);
+    const cellInfo = cellData[cellRef] || { value: "" };
+    
+    setEditingCell({ row, col });
+    setEditValue(cellInfo.formula || cellInfo.value);
+    
+    // Focus the input after a short delay to ensure it's rendered
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  }, [cellData, isFormulaBuildingMode]);
+
+  // Finish editing
+  const finishEditing = useCallback(() => {
+    if (!editingCell) return;
+    
+    const cellRef = getCellRef(editingCell.row, editingCell.col);
+    const isFormula = editValue.startsWith('=');
+    
+    let displayValue = editValue;
+    
+    if (isFormula) {
+      // Create formula context for evaluation
+      const formulaContext: FormulaContext = {
+        getCellValue: (ref: string) => {
+          const cellInfo = cellData[ref];
+          return cellInfo ? cellInfo.value : '';
+        },
+        setCellValue: (ref: string, value: string) => {
+          // For now, just implement the getter
+        }
+      };
+      
+      try {
+        displayValue = evaluateFormula(editValue, formulaContext);
+      } catch (error) {
+        displayValue = '#ERROR!';
+      }
+    }
+    
+    onCellUpdate(cellRef, {
+      value: displayValue,
+      formula: isFormula ? editValue : undefined
+    });
+    
+    setEditingCell(null);
+    setEditValue("");
+  }, [editingCell, editValue, cellData, onCellUpdate]);
+
+  // Handle keyboard events
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (editingCell) {
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          finishEditing();
+          
+          // Move to next cell
+          const nextRow = event.key === 'Enter' ? editingCell.row + 1 : editingCell.row;
+          const nextCol = event.key === 'Tab' ? editingCell.col + 1 : editingCell.col;
+          
+          if (nextRow < GRID_ROWS && nextCol < GRID_COLS) {
+            handleCellSelect(nextRow, nextCol);
+          }
+        } else if (event.key === 'Escape') {
+          setEditingCell(null);
+          setEditValue("");
+        }
+        return;
+      }
+
+      // Non-editing mode keyboard shortcuts
+      const currentRow = selection.start.row;
+      const currentCol = selection.start.col;
+      
+      switch (event.key) {
+        case 'ArrowUp':
+          event.preventDefault();
+          if (currentRow > 0) {
+            handleCellSelect(currentRow - 1, currentCol, event.shiftKey);
+          }
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          if (currentRow < GRID_ROWS - 1) {
+            handleCellSelect(currentRow + 1, currentCol, event.shiftKey);
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          if (currentCol > 0) {
+            handleCellSelect(currentRow, currentCol - 1, event.shiftKey);
+          }
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          if (currentCol < GRID_COLS - 1) {
+            handleCellSelect(currentRow, currentCol + 1, event.shiftKey);
+          }
+          break;
+        case 'Enter':
+          event.preventDefault();
+          handleCellDoubleClick(currentRow, currentCol);
+          break;
+        case 'F2':
+          event.preventDefault();
+          handleCellDoubleClick(currentRow, currentCol);
+          break;
+        case 'Delete':
+        case 'Backspace':
+          event.preventDefault();
+          // Clear selected cells
+          const cellsToUpdate = getSelectedCells();
+          cellsToUpdate.forEach(cellRef => {
+            onCellUpdate(cellRef, { value: "" });
+          });
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [editingCell, selection, finishEditing, handleCellSelect, handleCellDoubleClick, onCellUpdate, handleMouseUp]);
+
+  // Get selected cell references
+  const getSelectedCells = useCallback((): string[] => {
+    const cells: string[] = [];
+    const startRow = Math.min(selection.start.row, selection.end.row);
+    const endRow = Math.max(selection.start.row, selection.end.row);
+    const startCol = Math.min(selection.start.col, selection.end.col);
+    const endCol = Math.max(selection.start.col, selection.end.col);
+    
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        cells.push(getCellRef(row, col));
+      }
+    }
+    
+    return cells;
   }, [selection]);
 
-  const isRowSelected = useCallback((row: number): boolean => {
-    const minRow = Math.min(selection.start.row, selection.end.row);
-    const maxRow = Math.max(selection.start.row, selection.end.row);
-    return row >= minRow && row <= maxRow;
+  // Check if a cell is selected
+  const isInSelection = useCallback((row: number, col: number): boolean => {
+    const startRow = Math.min(selection.start.row, selection.end.row);
+    const endRow = Math.max(selection.start.row, selection.end.row);
+    const startCol = Math.min(selection.start.col, selection.end.col);
+    const endCol = Math.max(selection.start.col, selection.end.col);
+    
+    return row >= startRow && row <= endRow && col >= startCol && col <= endCol;
   }, [selection]);
 
-  const isColSelected = useCallback((col: number): boolean => {
-    const minCol = Math.min(selection.start.col, selection.end.col);
-    const maxCol = Math.max(selection.start.col, selection.end.col);
-    return col >= minCol && col <= maxCol;
-  }, [selection]);
-
-  // Helper function to check if cell is in formula reference
+  // Check if cell is in formula reference
   const isInFormulaReference = useCallback((cellRef: string): FormulaReference | null => {
     for (const ref of formulaReferences) {
       if (ref.range.includes(':')) {
         // Range reference
         const [start, end] = ref.range.split(':');
-        const startCell = parseCellRefString(start);
-        const endCell = parseCellRefString(end);
-        const currentCell = parseCellRefString(cellRef);
-        
-        if (startCell && endCell && currentCell) {
-          if (currentCell.row >= Math.min(startCell.row, endCell.row) &&
-              currentCell.row <= Math.max(startCell.row, endCell.row) &&
-              currentCell.col >= Math.min(startCell.col, endCell.col) &&
-              currentCell.col <= Math.max(startCell.col, endCell.col)) {
-            return ref;
-          }
-        }
-      } else {
-        // Single cell reference
-        if (ref.range === cellRef) {
+        // For simplicity, we'll just check if cellRef is the start or end
+        if (cellRef === start || cellRef === end) {
           return ref;
         }
+      } else if (ref.range === cellRef) {
+        return ref;
       }
     }
     return null;
   }, [formulaReferences]);
 
-  // Helper function to parse cell reference string
-  const parseCellRefString = (cellRef: string): { row: number; col: number } | null => {
-    const match = cellRef.match(/^([A-Z]+)(\d+)$/);
-    if (!match) return null;
+  // Get range borders for visual indication
+  const getRangeBorders = useCallback((row: number, col: number): string => {
+    const startRow = Math.min(selection.start.row, selection.end.row);
+    const endRow = Math.max(selection.start.row, selection.end.row);
+    const startCol = Math.min(selection.start.col, selection.end.col);
+    const endCol = Math.max(selection.start.col, selection.end.col);
     
-    const colStr = match[1];
-    const rowStr = match[2];
-    
-    let col = 0;
-    for (let i = 0; i < colStr.length; i++) {
-      col = col * 26 + (colStr.charCodeAt(i) - 65 + 1);
-    }
-    col -= 1; // Convert to 0-based
-    
-    const row = parseInt(rowStr) - 1; // Convert to 0-based
-    
-    return { col, row };
-  };
-
-  const getRangeBorders = useCallback((row: number, col: number) => {
     if (!isInSelection(row, col)) return '';
     
-    const minRow = Math.min(selection.start.row, selection.end.row);
-    const maxRow = Math.max(selection.start.row, selection.end.row);
-    const minCol = Math.min(selection.start.col, selection.end.col);
-    const maxCol = Math.max(selection.start.col, selection.end.col);
+    let borders = [];
     
-    const isTopEdge = row === minRow;
-    const isBottomEdge = row === maxRow;
-    const isLeftEdge = col === minCol;
-    const isRightEdge = col === maxCol;
+    if (row === startRow) borders.push('border-t-2');
+    if (row === endRow) borders.push('border-b-2');
+    if (col === startCol) borders.push('border-l-2');
+    if (col === endCol) borders.push('border-r-2');
     
-    let borderClasses = '';
-    
-    if (isTopEdge) borderClasses += ' border-t-2 border-t-[#127d42]';
-    if (isBottomEdge) borderClasses += ' border-b-2 border-b-[#127d42]';
-    if (isLeftEdge) borderClasses += ' border-l-2 border-l-[#127d42]';
-    if (isRightEdge) borderClasses += ' border-r-2 border-r-[#127d42]';
-    
-    return borderClasses;
+    return borders.join(' ') + (borders.length > 0 ? ' border-blue-500' : '');
   }, [selection, isInSelection]);
 
-  const handleCellClick = (row: number, col: number, isShiftClick: boolean = false) => {
-    if (editingCell) {
-      finishEditing();
-    }
-
-    const cellRef = getCellRef(row, col);
-
-    // Handle formula building mode
-    if (isFormulaBuildingMode && onCellClickInFormulaMode) {
-      onCellClickInFormulaMode(cellRef, isShiftClick);
-      return;
-    }
-
-    if (isShiftClick && selection.start) {
-      setSelection({
-        start: selection.start,
-        end: { row, col }
-      });
-    } else {
-      setSelection({
-        start: { row, col },
-        end: { row, col }
-      });
-    }
-
-    const cellInfo = cellData[cellRef] || { value: "" };
-    onCellSelect(cellRef, cellInfo.value);
-  };
-
-  const handleCellDoubleClick = (row: number, col: number) => {
-    const cellRef = getCellRef(row, col);
-    const cellInfo = cellData[cellRef] || { value: "" };
-    setEditingCell({ row, col });
-    setEditValue(cellInfo.formula || cellInfo.value);
-    setTimeout(() => editInputRef.current?.focus(), 0);
-  };
-
-  const handleMouseDown = (row: number, col: number) => {
-    setIsSelecting(true);
-    handleCellClick(row, col);
-  };
-
-  const handleMouseOver = (row: number, col: number) => {
-    if (isSelecting) {
-      setSelection(prev => ({
-        start: prev.start,
-        end: { row, col }
-      }));
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsSelecting(false);
-  };
-
-  const finishEditing = () => {
-    if (editingCell) {
-      const cellRef = getCellRef(editingCell.row, editingCell.col);
-      const isFormula = editValue.startsWith('=');
-      
-      let displayValue = editValue;
-      
-      if (isFormula) {
-        // Create formula context for evaluation
-        const formulaContext: FormulaContext = {
-          getCellValue: (ref: string) => {
-            const cellInfo = cellData[ref];
-            return cellInfo ? cellInfo.value : '';
-          },
-          setCellValue: (ref: string, value: string) => {
-            // This would be used for more complex formulas that modify other cells
-            // For now, we'll just implement the getter
-          }
-        };
-        
-        // Evaluate the formula
-        displayValue = evaluateFormula(editValue, formulaContext);
-      }
-      
-      onCellUpdate(cellRef, {
-        value: displayValue,
-        formula: isFormula ? editValue : undefined
-      });
-      
-      setEditingCell(null);
-      setEditValue("");
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (editingCell) {
-      if (e.key === 'Enter') {
-        finishEditing();
-      } else if (e.key === 'Escape') {
-        setEditingCell(null);
-        setEditValue("");
-      }
-      return;
-    }
-
-    // Navigation keys
-    const { row, col } = selection.start;
-    let newRow = row;
-    let newCol = col;
-
-    switch (e.key) {
-      case 'ArrowUp':
-        newRow = Math.max(0, row - 1);
-        break;
-      case 'ArrowDown':
-        newRow = Math.min(GRID_ROWS - 1, row + 1);
-        break;
-      case 'ArrowLeft':
-        newCol = Math.max(0, col - 1);
-        break;
-      case 'ArrowRight':
-        newCol = Math.min(GRID_COLS - 1, col + 1);
-        break;
-      case 'Enter':
-        handleCellDoubleClick(row, col);
-        return;
-      case 'F2':
-        handleCellDoubleClick(row, col);
-        return;
-      default:
-        // Start editing if a printable character is pressed
-        if (e.key.length === 1 && !e.ctrlKey && !e.altKey) {
-          setEditingCell({ row, col });
-          setEditValue(e.key);
-          setTimeout(() => editInputRef.current?.focus(), 0);
-        }
-        return;
-    }
-
-    if (newRow !== row || newCol !== col) {
-      e.preventDefault();
-      handleCellClick(newRow, newCol, e.shiftKey);
-    }
-  };
-
-  useEffect(() => {
-    const currentSelection = parseSelection(selection);
-    const cellRef = getCellRef(selection.start.row, selection.start.col);
-    const cellInfo = cellData[cellRef] || { value: "" };
-    onCellSelect(currentSelection, cellInfo.value);
-    onSelectionChange?.(selection);
-  }, [selection, cellData, onCellSelect, onSelectionChange]);
-
-  useEffect(() => {
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
-  }, []);
-
   return (
-    <div 
-      className="flex-1 overflow-auto bg-white focus:outline-none" 
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      ref={gridRef}
-    >
-      <div className="inline-block min-w-full">
-        {/* Header Row */}
-        <div className="flex sticky top-0 z-10">
-          {/* Top-left corner */}
-          <div className="w-12 h-6 bg-gray-100 border-r border-b border-gray-300 flex items-center justify-center text-xs font-medium sticky left-0 z-20"></div>
-          
-          {/* Column Headers */}
-          {Array.from({ length: GRID_COLS }, (_, colIndex) => (
-            <div
-              key={colIndex}
-              className={`w-20 h-6 border-r border-b border-gray-300 flex items-center justify-center text-xs font-medium cursor-pointer select-none ${
-                isColSelected(colIndex)
-                  ? 'bg-[#c9e9d7] text-[#127d42] border-b-[#127d42]'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-              }`}
-              onClick={() => {
-                // Select entire column
-                setSelection({
-                  start: { row: 0, col: colIndex },
-                  end: { row: GRID_ROWS - 1, col: colIndex }
-                });
-              }}
-            >
-              {getColumnName(colIndex)}
-            </div>
-          ))}
-        </div>
+    <div className="flex flex-col h-full bg-white">
+      {/* Column headers */}
+      <div className="flex sticky top-0 z-10 bg-gray-100 border-b border-gray-300">
+        <div className="w-12 h-6 border-r border-gray-300 bg-gray-200"></div>
+        {Array.from({ length: GRID_COLS }, (_, colIndex) => (
+          <div
+            key={colIndex}
+            className="w-20 h-6 border-r border-gray-300 bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-600"
+          >
+            {getColumnName(colIndex)}
+          </div>
+        ))}
+      </div>
 
-        {/* Data Rows */}
+      {/* Grid content */}
+      <div 
+        ref={gridRef}
+        className="flex-1 overflow-auto"
+        style={{ maxHeight: 'calc(100vh - 200px)' }}
+      >
         {Array.from({ length: GRID_ROWS }, (_, rowIndex) => (
           <div key={rowIndex} className="flex">
-            {/* Row Header */}
-            <div
-              className={`w-12 h-6 border-r border-b border-gray-300 flex items-center justify-end pr-2 text-sm font-medium cursor-pointer select-none sticky left-0 z-10 ${
-                isRowSelected(rowIndex)
-                  ? 'bg-[#c9e9d7] text-[#127d42] border-r-[#127d42]'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-              }`}
-              onClick={() => {
-                // Select entire row
-                setSelection({
-                  start: { row: rowIndex, col: 0 },
-                  end: { row: rowIndex, col: GRID_COLS - 1 }
-                });
-              }}
-            >
+            {/* Row header */}
+            <div className="w-12 h-6 border-r border-b border-gray-300 bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-600 sticky left-0 z-10">
               {rowIndex + 1}
             </div>
-
-            {/* Data Cells */}
+            
+            {/* Row cells */}
             {Array.from({ length: GRID_COLS }, (_, colIndex) => {
               const cellRef = getCellRef(rowIndex, colIndex);
               const cellInfo = cellData[cellRef] || { value: "" };
@@ -380,60 +364,74 @@ export const ExcelGrid = ({
               
               // Get cell formatting styles
               const cellStyles = getCellStyle(cellInfo);
-              // Determine background color and styles
+              const formattedValue = formatCellValue(cellInfo);
               
               // Determine background color and styles
               let cellStyle: React.CSSProperties = { ...cellStyles };
               let borderStyle = '';
-                bgColor = 'bg-transparent';
+              let bgColor = 'bg-white';
+              
               if (isSelected) {
                 // Make selected cells transparent with selection border
-                bgColor = 'bg-transparent';]';
-                  borderStyle = 'bo
+                bgColor = 'bg-transparent';
+                if (isActiveCell) {
                   // Active cell gets a thick green border
                   borderStyle = 'border-2 border-[#127d42]';
-                 
+                } else {
                   // Other selected cells get a thin green border
+                  borderStyle = 'border border-[#127d42]';
+                }
+              } else if (formulaRef) {
                 // Override with formula reference styling
-                 
-              return (
-                // Override with formula reference styling16)}, ${parseInt(formulaRef.color.slice(3, 5), 16)}, ${parseInt(formulaRef.color.slice(5, 7), 16)}, 0.3)`,
                 cellStyle = {
-              return (
+                  ...cellStyle,
                   backgroundColor: `rgba(${parseInt(formulaRef.color.slice(1, 3), 16)}, ${parseInt(formulaRef.color.slice(3, 5), 16)}, ${parseInt(formulaRef.color.slice(5, 7), 16)}, 0.3)`,
-                  className={`w-20 h-6 border-r 
-                  borderWidth: '2px',) {
-                  onMouseOver={() => h
+                  borderWidth: '2px',
+                  borderColor: formulaRef.color,
+                  borderStyle: 'solid'
                 };
               } else if (isRangeStart) {
                 bgColor = 'bg-blue-100';
-                      value={editValue}
+              }
 
-                      onBlur={finishEditing}r-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
-                <div=> {
-                  key={colIndex}}
-                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
-                          finishEditing();
-                  onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
+              return (
+                <div
+                  key={colIndex}
+                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${borderStyle} ${rangeBorders}`}
+                  style={cellStyle}
+                  onMouseDown={(e) => handleMouseDown(rowIndex, colIndex, e)}
                   onMouseOver={() => handleMouseOver(rowIndex, colIndex)}
                   onDoubleClick={() => handleCellDoubleClick(rowIndex, colIndex)}
-                      ref={editInputRef}
+                >
                   {isEditing ? (
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
-                      ref={editInputRef}
-                      onKeyDown={(e) => {
-                      onChange={(e) => setEditValue(e.target.value)}
-                        if (e.key === 'Enter') {
-                      onKeyDown={(e) => {
-                        e.stopPropagation();flow-hidden"
-                        if (e.key === 'Enter') {
-                          finishEditing();
-                        } else if (e.key === 'Escape') {
-                          setEditingCell(null);
-                          setEditValue("");der-0 outline-none bg-transparent"
-                      style={cellStyles}
+                      onBlur={finishEditing}
+                      className="w-full h-full px-1 border-none outline-none bg-white text-xs"
+                      style={{ fontSize: cellStyle.fontSize || '11px' }}
+                    />
+                  ) : (
+                    <div 
+                      className="w-full h-full px-1 flex items-center text-xs overflow-hidden"
+                      style={{ 
+                        fontSize: cellStyle.fontSize || '11px',
+                        textAlign: cellStyle.textAlign as any || 'left',
+                        justifyContent: cellStyle.textAlign === 'center' ? 'center' : 
+                                      cellStyle.textAlign === 'right' ? 'flex-end' : 'flex-start'
                       }}
-                      className="w-full h-full px-1 text-xs border-0 outline-none bg-transparent"
-                      style={cellStyles}
+                    >
+                      {formattedValue}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
