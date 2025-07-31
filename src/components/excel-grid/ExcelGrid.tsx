@@ -385,9 +385,25 @@ export const ExcelGrid = ({
               // Determine background color and styles
               let bgColor = 'bg-white hover:bg-gray-50';
               let cellStyle: React.CSSProperties = { ...cellStyles };
+              let borderStyle = '';
               
               if (isSelected) {
-                bgColor = 'bg-[#e8f2ec]';
+                // Make selected cells transparent with selection border, but preserve cell background colors
+                if (cellStyles.backgroundColor) {
+                  // If cell has a custom background color, keep it but remove hover effect
+                  bgColor = '';
+                } else {
+                  // If no custom background, make it transparent and remove hover effect
+                  bgColor = 'bg-transparent';
+                }
+                
+                if (isActiveCell) {
+                  // Active cell gets a thick green border
+                  borderStyle = 'border-2 border-[#127d42]';
+                } else {
+                  // Other selected cells get a thin green border
+                  borderStyle = 'border border-[#127d42]';
+                }
               } else if (formulaRef) {
                 // Override with formula reference styling
                 cellStyle = {
@@ -404,7 +420,7 @@ export const ExcelGrid = ({
               return (
                 <div
                   key={colIndex}
-                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders}`}
+                  className={`w-20 h-6 border-r border-b border-gray-300 relative cursor-cell ${bgColor} ${rangeBorders} ${borderStyle}`}
                   style={cellStyle}
                   onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
                   onMouseOver={() => handleMouseOver(rowIndex, colIndex)}
