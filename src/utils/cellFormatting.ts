@@ -1,3 +1,4 @@
+import React from 'react';
 import { CellData, CellFormat, Selection, ClipboardData } from '@/types/cellTypes';
 
 export function getCellRef(row: number, col: number): string {
