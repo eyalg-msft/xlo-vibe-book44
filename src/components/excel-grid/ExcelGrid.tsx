@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { CellData, Selection } from "@/types/cellTypes";
-import { getCellStyle, formatCellValue, getCellRef } from "@/utils/cellFormatting";
 
 interface FormulaReference {
-  id: string;
+
   range: string;
   color: string;
 }
